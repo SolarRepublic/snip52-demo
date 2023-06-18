@@ -1,0 +1,36 @@
+{
+  "name": "snip-52-client-ref-impl",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "vite": "./node_modules/.bin/vite",
+    "build": "yarn vite build",
+    "dev": "yarn vite"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@cosmjs/amino": "^0.30.1",
+    "@fortawesome/fontawesome-svg-core": "^6.4.0",
+    "@fortawesome/free-solid-svg-icons": "^6.4.0",
+    "@keplr-wallet/types": "^0.12.10",
+    "@nfps.dev/runtime": "^0.10.1",
+    "secretjs": "^1.9.3"
+  },
+  "devDependencies": {
+    "@blake.regalia/belt": "^0.15.0",
+    "@blake.regalia/eslint-config-elite": "^0.2.10",
+    "@blake.regalia/tsconfig": "^0.1.2",
+    "@nfps.dev/sdk": "^0.7.0",
+    "@solar-republic/neutrino": "^0.6.2",
+    "@sveltejs/vite-plugin-svelte": "^2.4.1",
+    "less": "^4.1.3",
+    "svelte": "^3.59.1",
+    "svelte-preprocess": "^5.0.4",
+    "typescript": "^5.1.3",
+    "vite": "^4.3.9"
+  }
+}
