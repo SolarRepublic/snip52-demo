@@ -6,7 +6,7 @@
 	import {create_html, ls_read_json, ls_write_json, qsa} from '@nfps.dev/runtime';
 	import {encodeCosmosFeegrantBasicAllowance, encodeCosmosFeegrantGrant} from '@solar-republic/cosmos-grpc/cosmos/feegrant/v1beta1/feegrant';
 	import {bech32_encode, bech32_decode} from '@solar-republic/crypto';
-	import {exec_secret_contract, SecretContract, broadcast_result, create_and_sign_tx_direct, sign_secret_query_permit, query_secret_contract_infer, subscribe_snip52_channels} from '@solar-republic/neutrino';
+	import {exec_secret_contract, query_secret_contract, SecretContract, broadcast_result, create_and_sign_tx_direct, sign_secret_query_permit, subscribe_snip52_channels} from '@solar-republic/neutrino';
 
 	import {getContext, tick} from 'svelte';
 
@@ -99,7 +99,7 @@
 
 		const g_permit = await sign_secret_query_permit(K_WALLET, 'snip52-demo', [k_contract.addr], ['owner']);
 
-		const [g_result, xc_code, s_error] = await query_secret_contract_infer(k_contract, 'channel_info', {
+		const [g_result, xc_code, s_error] = await query_secret_contract(k_contract, 'channel_info', {
 			channel: 'message',
 		}, g_permit);
 

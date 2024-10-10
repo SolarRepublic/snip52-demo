@@ -3,41 +3,30 @@
 	import type {IconDefinition} from '@fortawesome/fontawesome-svg-core';
 	import type {Key as KeplrKey} from '@keplr-wallet/types';
 	import type {ComcClient} from '@nfps.dev/runtime';
+	import type {CosmosBaseCoin} from '@solar-republic/cosmos-grpc/cosmos/base/v1beta1/coin';
+	import type {Wallet, create_tx_body, CwSecretAccAddr} from '@solar-republic/neutrino';
 	import type {CwAccountAddr} from '@solar-republic/types';
-	
+
+	import type {JsonAny} from 'node_modules/@solar-republic/cosmos-grpc/build/dist/api/types';
+
 	import {oda, ode} from '@blake.regalia/belt';
+	import {faCircleInfo, faHandHoldingDollar, faReceipt, faServer, faUser, faWallet} from '@fortawesome/free-solid-svg-icons';
 	import {create_html, create_svg, qsa} from '@nfps.dev/runtime';
-	import {create_tx_body, Wallet, type CwSecretAccAddr} from '@solar-republic/neutrino';
-	
-	import {
-		faCircleInfo,
-		faHandHoldingDollar,
-		faReceipt,
-		faServer,
-		faUser,
-		faWallet,
-	} from '@fortawesome/free-solid-svg-icons';
+	import {queryCosmosBankSpendableBalances} from '@solar-republic/cosmos-grpc/cosmos/bank/v1beta1/query';
+	import {encodeCosmosFeegrantBasicAllowance, type CosmosFeegrantBasicAllowance, encodeCosmosFeegrantGrant} from '@solar-republic/cosmos-grpc/cosmos/feegrant/v1beta1/feegrant';
+	import {queryCosmosFeegrantAllowances} from '@solar-republic/cosmos-grpc/cosmos/feegrant/v1beta1/query';
 
-	import {
-		queryCosmosBankSpendableBalances,
-	} from '@solar-republic/cosmos-grpc/cosmos/bank/v1beta1/query';
 
-	import {
-		queryCosmosFeegrantAllowances,
-	} from '@solar-republic/cosmos-grpc/cosmos/feegrant/v1beta1/query';
-	
-	
+
 	import G_PACKAGE_JSON_NEUTRINO from '@solar-republic/neutrino/package.json';
-	
+
 	import {afterUpdate, beforeUpdate, tick, getContext, createEventDispatcher} from 'svelte';
-	import type { CosmosBaseCoin } from '@solar-republic/cosmos-grpc/cosmos/base/v1beta1/coin';
-	import { encodeCosmosFeegrantBasicAllowance, type CosmosFeegrantBasicAllowance, encodeCosmosFeegrantGrant } from '@solar-republic/cosmos-grpc/cosmos/feegrant/v1beta1/feegrant';
-	import type { JsonAny } from 'node_modules/@solar-republic/cosmos-grpc/build/dist/api/types';
+
 
 	const {
 		K_WALLET,
 	} = getContext<{
-		K_WALLET: Wallet,
+		K_WALLET: Wallet;
 	}>('env');
 
 	const dispatch = createEventDispatcher();
@@ -325,15 +314,15 @@
 				opacity: 0;
 			}
 		}
-	
+
 		>:first-child {
 			display: flex;
 			align-items: center;
 			gap: 8px;
-	
+
 			height: @xlh_collapsed;
 		}
-	
+
 		// push the scrollbar into the margins
 		>:last-child {
 			margin-right: -(ceil(@xlw_scrollbar_gap * (3/4)));
@@ -349,7 +338,7 @@
 				padding: 8px 16px;
 				border-radius: 6px
 			}
-			
+
 			:global(&.cta) {
 				background: hsl(225 29% 71% / 1);
 				border-color: #66f;
@@ -402,7 +391,7 @@
 
 			>span {
 				margin-left: 6px;
-	
+
 				&:first-child {
 					cursor: pointer;
 					margin: 0;
@@ -466,11 +455,11 @@
 		>* {
 			// leave space on right side for scrollbar
 			margin-right: @xlw_scrollbar_gap;
-	
+
 			&:first-child {
 				margin-top: @xlh_scroll_fade + 2px;
 			}
-	
+
 			&:last-child {
 				margin-bottom: @xlh_scroll_fade + 2px;
 			}
@@ -536,7 +525,7 @@
 							Neutrino Wallet v{G_PACKAGE_JSON_NEUTRINO.version}
 						{/if}
 					</h3>
-	
+
 					<div class="fields">
 						{#each ode(h_menu) as [si_label, z_value]}
 							{#if Array.isArray(z_value) && 'function' === typeof z_value[0]}
