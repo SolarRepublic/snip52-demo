@@ -12,7 +12,7 @@ export default defineConfig(({mode}) => {
 	return {
 		build: {
 			outDir: resolve(__dirname, 'dist'),
-			emptyOutDir: false,
+			emptyOutDir: true,
 			minify: !B_DEV,
 			sourcemap: B_DEV? 'inline': false,
 			target: ['esnext'],

@@ -1,14 +1,13 @@
 <script lang="ts">
 	import type {Arrayable} from '@blake.regalia/belt';
-	import type {Coin} from '@cosmjs/amino';
 	import type {IconDefinition} from '@fortawesome/fontawesome-svg-core';
 	import type {Key as KeplrKey} from '@keplr-wallet/types';
 	import type {ComcClient} from '@nfps.dev/runtime';
-	import type {SecretBech32} from '@solar-republic/neutrino';
+	import type {CwAccountAddr} from '@solar-republic/types';
 	
 	import {oda, ode} from '@blake.regalia/belt';
 	import {create_html, create_svg, qsa} from '@nfps.dev/runtime';
-	import {create_tx, Wallet} from '@solar-republic/neutrino';
+	import {create_tx_body, Wallet, type CwSecretAccAddr} from '@solar-republic/neutrino';
 	
 	import {
 		faCircleInfo,
@@ -20,16 +19,20 @@
 	} from '@fortawesome/free-solid-svg-icons';
 
 	import {
-		anyBasicAllowance,
-		msgGrantAllowance,
-		queryBankSpendableBalances,
-		queryFeegrantAllowances,
-	} from '@solar-republic/neutrino';
+		queryCosmosBankSpendableBalances,
+	} from '@solar-republic/cosmos-grpc/cosmos/bank/v1beta1/query';
+
+	import {
+		queryCosmosFeegrantAllowances,
+	} from '@solar-republic/cosmos-grpc/cosmos/feegrant/v1beta1/query';
 	
 	
 	import G_PACKAGE_JSON_NEUTRINO from '@solar-republic/neutrino/package.json';
 	
 	import {afterUpdate, beforeUpdate, tick, getContext, createEventDispatcher} from 'svelte';
+	import type { CosmosBaseCoin } from '@solar-republic/cosmos-grpc/cosmos/base/v1beta1/coin';
+	import { encodeCosmosFeegrantBasicAllowance, type CosmosFeegrantBasicAllowance, encodeCosmosFeegrantGrant } from '@solar-republic/cosmos-grpc/cosmos/feegrant/v1beta1/feegrant';
+	import type { JsonAny } from 'node_modules/@solar-republic/cosmos-grpc/build/dist/api/types';
 
 	const {
 		K_WALLET,
@@ -100,7 +103,7 @@
 	let dm_viewport: HTMLDivElement;
 
 	let a_feegrants: [
-		sa_granter: SecretBech32,
+		sa_granter: CwAccountAddr,
 		s_amount: string,
 	][] = [];
 
@@ -109,8 +112,8 @@
 
 	let b_collapsed = true;
 
-	const accumulate_uscrt = (a_coins: Coin[]) => a_coins
-		.reduce((xg_out, g_coin) => 'uscrt' === g_coin.denom? xg_out + BigInt(g_coin.amount): 0n, 0n);
+	const accumulate_uscrt = (a_coins: CosmosBaseCoin[]) => a_coins
+		.reduce((xg_out, g_coin) => 'uscrt' === g_coin.denom? xg_out + BigInt(g_coin.amount!): 0n, 0n);
 
 	const uscrt_to_string = (xg_amount: bigint): string => {
 		const s_amount = (xg_amount+'').padStart(6, '0');
@@ -121,21 +124,21 @@
 		a_feegrants = [];
 
 		await Promise.all([
-			queryBankSpendableBalances(K_WALLET.lcd, SA_WALLET).then(a_coins => xg_balance += accumulate_uscrt(a_coins)),
+			queryCosmosBankSpendableBalances(K_WALLET.lcd, SA_WALLET).then(([,, g_res]) => xg_balance += accumulate_uscrt(g_res.balances!)),
 
-			queryFeegrantAllowances(K_WALLET.lcd, SA_WALLET).then((a_results) => {
-				for(const g_result of a_results) {
-					const g_allowance = g_result.allowance;
-					const si_type = g_allowance['@type'];
+			queryCosmosFeegrantAllowances(K_WALLET.lcd, SA_WALLET).then(([,, g_res]) => {
+				for(const g_result of g_res.allowances!) {
+					const g_allowance = g_result.allowance as CosmosFeegrantBasicAllowance;
+					const si_type = (g_allowance as JsonAny)['@type'];
 
 					// basic allowance
 					if(si_type.includes('Basic')) {
 						// no expiration or hasn't taken effect yet
 						const s_expiration = g_allowance.expiration;
 						if(!s_expiration || Date.parse(s_expiration) > Date.now()) {
-							const xg_limit = accumulate_uscrt(g_allowance.spend_limit);
+							const xg_limit = accumulate_uscrt(g_allowance.spend_limit!);
 							xg_granted += xg_limit;
-							a_feegrants.push([g_result.granter, uscrt_to_string(xg_limit)]);
+							a_feegrants.push([g_result.granter!, uscrt_to_string(xg_limit)]);
 						}
 					}
 				}
@@ -208,7 +211,7 @@
 	let k_portal: ComcClient;
 	let g_webext_account: KeplrKey;
 	const init_portal = async(fk_ready: (
-		sa_account: SecretBech32,
+		sa_account: CwSecretAccAddr,
 		s_name: string,
 		atu8_pk33: Uint8Array
 	) => any, fk_signed?: () => any) => {
@@ -235,11 +238,11 @@
 		], 'Grant Allowance', async() => {
 			const xg_limit = 1_000_000n;  // 1 SCRT
 
-			const atu8_allowance = anyBasicAllowance([[xg_limit, 'uscrt']]);
+			const atu8_allowance = encodeCosmosFeegrantBasicAllowance([[`${xg_limit}`, 'uscrt']]);
 
-			const atu8_msg = msgGrantAllowance(sa_webext, SA_WALLET, atu8_allowance);
+			const atu8_msg = encodeCosmosFeegrantGrant(sa_webext, SA_WALLET, atu8_allowance);
 
-			const [atu8_auth, atu8_body, sg_account] = await create_tx(1, {
+			const [atu8_auth, atu8_body, sg_account] = await create_tx_body(1, {
 				lcd: K_WALLET.lcd,
 				addr: sa_webext,
 				pk33: atu8_pk33,

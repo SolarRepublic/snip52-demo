@@ -1,21 +1,19 @@
 <script lang="ts">
-	import {base64_to_buffer, type AsJson, type JsonObject, sha256, text_to_buffer, buffer_to_base58, buffer_to_base93, buffer_to_base64, type Base64, buffer_to_text} from '@blake.regalia/belt';
-	import {timeout} from '@blake.regalia/belt';
-	import {bech32_decode, exec_contract, SecretContract, type SecretBech32, msgGrantAllowance, anyBasicAllowance, broadcast_result, create_and_sign_tx_direct, sign_query_permit, query_contract_infer, bech32_encode} from '@solar-republic/neutrino';
+	import type {AsJson, JsonObject} from '@blake.regalia/belt';
+	import type {CwSecretAccAddr, Wallet} from '@solar-republic/neutrino';
 
-	import { getContext, setContext, tick } from 'svelte';
+	import {sha256, text_to_bytes, bytes_to_base64, timeout} from '@blake.regalia/belt';
+	import {create_html, ls_read_json, ls_write_json, qsa} from '@nfps.dev/runtime';
+	import {encodeCosmosFeegrantBasicAllowance, encodeCosmosFeegrantGrant} from '@solar-republic/cosmos-grpc/cosmos/feegrant/v1beta1/feegrant';
+	import {bech32_encode, bech32_decode} from '@solar-republic/crypto';
+	import {exec_secret_contract, SecretContract, broadcast_result, create_and_sign_tx_direct, sign_secret_query_permit, query_secret_contract_infer, subscribe_snip52_channels} from '@solar-republic/neutrino';
+
+	import {getContext, tick} from 'svelte';
+
 	import WalletSvelte from './Wallet.svelte';
 
-	import {
-		Wallet,
-		gen_sk,
-		subscribe_snip52_channels,
-	} from '@solar-republic/neutrino';
-
-	import { create_html, ls_read_json, ls_write_json, qsa } from '@nfps.dev/runtime';
-
 	interface Contact extends JsonObject {
-		address: SecretBech32;
+		address: CwSecretAccAddr;
 		name: string | null;
 	}
 
@@ -29,16 +27,17 @@
 	interface Conversation {
 		contact: Contact;
 		messages: Message[];
+		unread: boolean;
 	}
 
-	type ChatHistory = Record<SecretBech32, Conversation>;
+	type ChatHistory = Record<CwSecretAccAddr, Conversation>;
 
 	const {
 		K_WALLET,
 		K_GRANTER,
 	} = getContext<{
-		K_WALLET: Wallet,
-		K_GRANTER: Wallet,
+		K_WALLET: Wallet;
+		K_GRANTER: Wallet;
 	}>('env');
 
 	let y_wallet!: WalletSvelte;
@@ -50,7 +49,7 @@
 	let s_input = '';
 	let b_input_disabled = false;
 
-	let dp_contract = SecretContract(K_WALLET.lcd, import.meta.env['VITE_CONTRACT']);
+	const dp_contract = SecretContract(K_WALLET.lcd, import.meta.env['VITE_CONTRACT']);
 	let k_contract;
 
 	let g_convo: Conversation | null = null;
@@ -81,14 +80,14 @@
 					}, [
 						'Dismiss',
 					]),
-				])
+				]),
 			]);
 
 			await tick();
 
 			const dm_copy = qsa(document.body, '.copy-addr')[0];
 			dm_copy.onclick = () => {
-				navigator.clipboard.writeText(K_WALLET.addr);
+				void navigator.clipboard.writeText(K_WALLET.addr);
 				dm_copy.textContent = 'Copied!';
 			};
 
@@ -98,27 +97,36 @@
 			};
 		}
 
-		const g_permit = await sign_query_permit(K_WALLET, 'snip52-demo', [k_contract.addr], ['owner']);
+		const g_permit = await sign_secret_query_permit(K_WALLET, 'snip52-demo', [k_contract.addr], ['owner']);
 
-		let [g_result, xc_code, s_error] = await query_contract_infer(k_contract, 'channel_info', {
+		const [g_result, xc_code, s_error] = await query_secret_contract_infer(k_contract, 'channel_info', {
 			channel: 'message',
 		}, g_permit);
 
 		if(s_error) {
 			y_wallet.cta('Testnet Instability', [
-				'The API node failed to process a query. This can happen occKionally on the pulsar testnet. Wait a few minutes and try reloading.',
+				'The API node failed to process a query. This can happen occaionally on the pulsar testnet. Wait a few minutes and try reloading.',
 			], 'Reload', () => {
 				location.reload();
 			});
 		}
 		else {
-			subscribe_snip52_channels(K_WALLET.rpc, k_contract, g_permit, {
-				message(a_data) {
-					const [atu8_sender, s_message] = a_data as [Uint8Array, string];
+			await subscribe_snip52_channels(K_WALLET.rpc, k_contract, g_permit, {
+				message(a_data: [Uint8Array, string]) {
+					const [atu8_sender, s_message] = a_data;
 
-					const sa_sender = bech32_encode('secret', atu8_sender) as SecretBech32;
+					const sa_sender = bech32_encode('secret', atu8_sender) as CwSecretAccAddr;
 
-					h_chats[sa_sender].messages.push({
+					const g_incoming = h_chats[sa_sender] || (h_chats[sa_sender] = {
+						contact: {
+							address: sa_sender,
+							name: null,
+						},
+						messages: [],
+						unread: true,
+					});
+
+					g_incoming.messages.push({
 						time: Date.now(),
 						text: s_message,
 						reactions: [],
@@ -127,23 +135,27 @@
 
 					// invalidate chats object and update storage
 					ls_write_json('history', (h_chats=h_chats) as AsJson<typeof h_chats>);
-					
+
 					// invalidate convo
 					if(sa_sender === g_convo?.contact.address) {
 						g_convo = h_chats[sa_sender];
-						scroll_bottom();
+						void scroll_bottom();
+					}
+					// set unread
+					else {
+						g_incoming.unread = true;
 					}
 				},
 
-				async reaction(a_data) {
-					const [atu8_sender, atu8_hash, s_emoji] = a_data as [Uint8Array, Uint8Array, string];
+				async reaction(a_data: [Uint8Array, Uint8Array, string]) {
+					const [atu8_sender, atu8_hash, s_emoji] = a_data;
 
-					const sa_sender = bech32_encode('secret', atu8_sender) as SecretBech32;
-					const sb64_msg_hash = buffer_to_base64(atu8_hash);
+					const sa_sender = bech32_encode('secret', atu8_sender) as CwSecretAccAddr;
+					const sb64_msg_hash = bytes_to_base64(atu8_hash);
 
 					// find message they are reacting to
-					for(let g_msg of h_chats[sa_sender].messages.slice().reverse()) {
-						const sb64_hash = buffer_to_base64(await sha256(text_to_buffer(g_msg.text)));
+					for(const g_msg of h_chats[sa_sender].messages.slice().reverse()) {
+						const sb64_hash = bytes_to_base64(await sha256(text_to_bytes(g_msg.text)));
 						if(sb64_hash === sb64_msg_hash) {
 							// add reaction
 							g_msg.reactions.push(s_emoji);
@@ -154,7 +166,7 @@
 							// invalidate convo
 							if(sa_sender === g_convo?.contact.address) {
 								g_convo = h_chats[sa_sender];
-								scroll_bottom();
+								void scroll_bottom();
 							}
 
 							// done
@@ -174,12 +186,12 @@
 
 			// prep contact
 			const g_contact = {
-				address: s_input as SecretBech32,
+				address: s_input as CwSecretAccAddr,
 				name: null,
 			};
 
 			// open chat
-			load_chat(g_contact);
+			void load_chat(g_contact);
 
 			// clear input and re-enable it
 			s_input = '';
@@ -200,9 +212,15 @@
 		g_convo = h_chats[g_contact.address] || (h_chats[g_contact.address] = {
 			contact: g_contact,
 			messages: [],
+			unread: false,
 		});
 
-		scroll_bottom();
+		g_convo.unread = false;
+
+		// invalidate chats
+		h_chats = h_chats;
+
+		void scroll_bottom();
 	}
 
 	let dm_scroll: HTMLDivElement;
@@ -223,12 +241,12 @@
 		const sa_recipient = g_convo.contact.address;
 
 		// submit tx
-		const [xc_code, sx_res, g_tx_res] = await exec_contract(await dp_contract, K_WALLET, {
+		const [xc_code, sx_res, g_tx_res] = await exec_secret_contract(await dp_contract, K_WALLET, {
 			send: {
 				recipient: sa_recipient,
 				message: s_chat_message,
 			},
-		}, [['2500', 'uscrt']], '50000', '', K_GRANTER.addr);
+		}, [['2500', 'uscrt']], '50000', K_GRANTER.addr);
 
 		// add message to convo
 		if(!xc_code && g_tx_res) {
@@ -241,7 +259,7 @@
 
 			// invalidate chats object and update storage
 			ls_write_json('history', (h_chats=h_chats) as AsJson<typeof h_chats>);
-			
+
 			// invalidate convo
 			if(sa_recipient === g_convo.contact.address) {
 				g_convo = h_chats[sa_recipient];
@@ -251,13 +269,13 @@
 			s_chat_message = '';
 			b_chat_disabled = false;
 
-			scroll_bottom();
+			void scroll_bottom();
 		}
 		else {
 			y_wallet.cta('Transaction Failed', [
 				sx_res,
 			], 'Retry', () => {
-				send_message();
+				void send_message();
 				y_wallet.reset_menu();
 			});
 		}
@@ -273,14 +291,14 @@
 		if(d_event.detail < 50_000n) {
 			b_busy = true;
 
-			const atu8_allowance = anyBasicAllowance([['10000000', 'uscrt']]);
-			const atu8_grant = msgGrantAllowance(K_GRANTER.addr, K_WALLET.addr, atu8_allowance);
+			const atu8_allowance = encodeCosmosFeegrantBasicAllowance([['10000000', 'uscrt']]);
+			const atu8_grant = encodeCosmosFeegrantGrant(K_GRANTER.addr, K_WALLET.addr, atu8_allowance);
 
 			// sign in direct mode
-			let [atu8_tx_raw, , si_txn] = await create_and_sign_tx_direct(K_GRANTER, [atu8_grant], [['190', 'uscrt']], '15000');
+			const [atu8_tx_raw, , si_txn] = await create_and_sign_tx_direct(K_GRANTER, [atu8_grant], [['190', 'uscrt']], '15000');
 
 			// broadcast to chain
-			let [xc_error, sx_res, g_tx_res] = await broadcast_result(K_GRANTER, atu8_tx_raw, si_txn);
+			const [xc_error, sx_res, g_tx_res] = await broadcast_result(K_GRANTER, atu8_tx_raw, si_txn);
 
 			// no errors; refresh spendable
 			if(!xc_error && g_tx_res) {
@@ -299,10 +317,10 @@
 		s_reaction_pending = s_emoji;
 
 		// submit tx
-		const [xc_code, sx_res, g_tx_res] = await exec_contract(await dp_contract, K_WALLET, {
+		const [xc_code, sx_res, g_tx_res] = await exec_secret_contract(await dp_contract, K_WALLET, {
 			react: {
 				author: g_convo?.contact.address,
-				message_hash: buffer_to_base64(await sha256(text_to_buffer(g_msg.text))),
+				message_hash: bytes_to_base64(await sha256(text_to_bytes(g_msg.text))),
 				reaction: s_emoji,
 			},
 		}, [['2500', 'uscrt']], '50000', '', K_GRANTER.addr);
@@ -319,7 +337,7 @@
 		g_msg_reaction_busy = null;
 		s_reaction_pending = '';
 
-		scroll_bottom();
+		void scroll_bottom();
 	}
 
 	function block_mouse_enter(this: HTMLDivElement) {
@@ -446,6 +464,11 @@
 						background: rgba(0,0,0,0.4);
 						border-color: white;
 					}
+
+					&.unread {
+						background: orange;
+						color: #111;
+					}
 				}
 			}
 		}
@@ -475,6 +498,12 @@
 				display: flex;
 				flex-direction: column;
 				gap: 0px;
+				min-height: calc(100vh - 220px);
+				justify-content: flex-end;
+
+				&.justify-start {
+					justify-content: flex-start;
+				}
 
 				.intro {
 					max-width: 600px;
@@ -656,7 +685,11 @@
 
 		<div class="contacts">
 			{#each Object.entries(h_chats) as [sa_contact, g_chat] (sa_contact)}
-				<div class:active={g_convo?.contact.address === sa_contact} on:click={() => load_chat(g_chat.contact)}>
+				<div
+					class:unread={g_chat.unread}
+					class:active={g_convo?.contact.address === sa_contact}
+					on:click={() => load_chat(g_chat.contact)}
+				>
 					{g_chat.contact.name ?? sa_contact}
 				</div>
 			{/each}
@@ -665,7 +698,7 @@
 
 	<div class="chat" class:align-self_auto={!g_convo}>
 		<div class="scroll" bind:this={dm_scroll}>
-			<div class="convo">
+			<div class="convo" class:justify-start={!g_convo}>
 				{#if !g_convo}
 					<div class="intro">
 						<h2>
@@ -681,9 +714,9 @@
 						</h2>
 
 						<p>
-							Your browser generated a unique hot wallet for you when you opened the page. That wallet has already, or is currently being, funded to send transactions on the Pulsar testnet, see wallet in top right corner.
+							Your browser generated a unique hot wallet for you when you opened the page. That wallet has already, or is currently being, funded to send transactions on the testnet, see wallet in top right corner.
 						</p>
-						
+
 						<h2>
 							What do I do?
 						</h2>
@@ -691,7 +724,7 @@
 						<p>
 							Send your address to a friend, or ask for theirs. Paste an address in the input on the left to start a new chat.
 						</p>
-						
+
 						<h2>
 							What's the point?
 						</h2>
@@ -746,7 +779,7 @@
 		</div>
 		<div class="draft">
 			<textarea bind:this={dm_draft} disabled={!g_convo || b_chat_disabled} bind:value={s_chat_message} on:keydown={keydown}></textarea>
-			<button disabled={!g_convo || b_chat_disabled}>
+			<button disabled={!g_convo || b_chat_disabled} on:click={send_message}>
 				Send{b_chat_disabled? 'ing...': ''}
 			</button>
 		</div>
